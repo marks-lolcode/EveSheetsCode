@@ -1,0 +1,98 @@
+/**
+ * @customfunction
+ * Compares columns A and B in the "FitCompare" sheet, identifies unmatched items,
+ * and writes the results to columns D and E.
+ *
+ * Inputs: Column A (A2:A500) and Column B (B2:B500)
+ * Output: Column D (Only in A) and Column E (Only in B), starting at D1/E1
+ */
+function compareAndWriteColumns() {
+  // Access the active spreadsheet and select the 'FitCompare' sheet
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("FitCompare");
+  if (!sheet) {
+    throw new Error("Sheet 'FitCompare' not found");
+  }
+  Logger.log("Successfully accessed 'FitCompare' sheet.");
+
+  // Load raw values from columns A and B, rows 2 through 500
+  const rawA = sheet.getRange("A2:A500").getValues().flat();
+  const rawB = sheet.getRange("B2:B500").getValues().flat();
+  Logger.log(`Raw A count: ${rawA.length}`);
+  Logger.log(`Raw B count: ${rawB.length}`);
+
+  // Helper function to clean and normalize data (trim strings, convert to lowercase, remove empty values)
+  const clean = arr =>
+    arr
+      .map(v => typeof v === 'string' ? v.trim().toLowerCase() : v)
+      .filter(v => v !== '' && v !== null && v !== undefined);
+
+  const listA = clean(rawA);
+  const listB = clean(rawB);
+  Logger.log(`Cleaned list A (count: ${listA.length}): ${JSON.stringify(listA)}`);
+  Logger.log(`Cleaned list B (count: ${listB.length}): ${JSON.stringify(listB)}`);
+
+  // Helper function to build a frequency map (value -> count)
+  const freqMap = list => {
+    const map = new Map();
+    for (const val of list) {
+      map.set(val, (map.get(val) || 0) + 1);
+    }
+    return map;
+  };
+
+  const freqA = freqMap(listA);
+  const freqB = freqMap(listB);
+  Logger.log("Frequency maps constructed.");
+
+  const onlyInA = [];
+  const onlyInB = [];
+
+  // Find values that are only in A or appear more times in A than B
+  for (const [val, countA] of freqA) {
+    const countB = freqB.get(val) || 0;
+    if (countA > countB) {
+      for (let i = 0; i < countA - countB; i++) {
+        onlyInA.push(val);
+      }
+    }
+  }
+
+  // Find values that are only in B or appear more times in B than A
+  for (const [val, countB] of freqB) {
+    const countA = freqA.get(val) || 0;
+    if (countB > countA) {
+      for (let i = 0; i < countB - countA; i++) {
+        onlyInB.push(val);
+      }
+    }
+  }
+
+  Logger.log(`Only in A (count: ${onlyInA.length}): ${JSON.stringify(onlyInA)}`);
+  Logger.log(`Only in B (count: ${onlyInB.length}): ${JSON.stringify(onlyInB)}`);
+
+  // Prepare output as pairs of unmatched items
+  const maxLength = Math.max(onlyInA.length, onlyInB.length);
+  const output = [];
+  for (let i = 0; i < maxLength; i++) {
+    output.push([onlyInA[i] || '', onlyInB[i] || '']);
+  }
+  Logger.log(`Prepared output with ${output.length} rows.`);
+
+  // Clear existing output in columns D and E
+  sheet.getRange("D1:E1000").clearContent();
+  Logger.log("Cleared range D1:E1000.");
+
+  // Write headers
+  sheet.getRange("D1:E1").setValues([["Only in A", "Only in B"]]);
+  Logger.log("Headers written to D1:E1.");
+
+  // Write result if there is any data to write
+  if (output.length > 0) {
+    sheet.getRange(2, 4, output.length, 2).setValues(output);
+    Logger.log(`Wrote ${output.length} rows of differences to D2:E${output.length + 1}.`);
+  } else {
+    Logger.log("No unmatched values to write.");
+  }
+
+  Logger.log("Final comparison complete. Operation successful.");
+}
