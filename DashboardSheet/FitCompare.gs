@@ -90,9 +90,10 @@ function getSystemForLocation(locationId) {
       Logger.log(`✗ Structure lookup failed for ${locationId}: ${e.message}`);
     }
   }
-  // Unknown range
+  // FleetHangar or other container locations that need to be resolved
+  // Will be handled by asset chain following in pullFitInventory()
   else {
-    Logger.log(`✗ Unknown location type for ${locationId} (not in station or structure range)`);
+    Logger.log(`ℹ Location ${locationId} requires asset chain resolution (FleetHangar or container)`);
   }
   
   // Return result
@@ -110,6 +111,20 @@ function pullFitInventory() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const fitCompare = ss.getSheetByName('FitCompare');
   const fitData = ss.getSheetByName('FitData');
+  
+
+// Get list of ship type IDs to exclude assembled ships
+const shipTypeIds = new Set();
+const sdeSheet = ss.getSheetByName('SDE_invTypes');
+if (sdeSheet) {
+  const typeData = sdeSheet.getRange('A2:D60000').getValues();
+  for (let i = 0; i < typeData.length; i++) {
+    if (typeData[i][3] && typeData[i][3].toString().includes('Ship')) { // Column D = group
+      shipTypeIds.add(typeData[i][0]); // Column A = typeID
+    }
+  }
+  Logger.log(`Loaded ${shipTypeIds.size} ship type IDs`);
+}
   
   // Get selected characters
   const selectedCharsRange = fitCompare.getRange('K3:L11');
@@ -130,7 +145,7 @@ function pullFitInventory() {
   // Setup
   const locationCache = {};
   const rows = [];
-  const locationFlags = ['Unlocked', 'Locked', 'Hangar', 'Deliveries', 'Cargo', 'CapsuleerDeliveries', 'InfrastructureHangar', 'FleetHangar'];
+  const locationFlags = ['Unlocked', 'Locked', 'Hangar', 'Deliveries', 'Cargo', 'CapsuleerDeliveries', 'InfrastructureHangar', 'FleetHangar', 'ShipHangar'];
   const skipFlags = ['AutoFit', 'Fitting'];
   
   let totalItems = 0;
@@ -169,10 +184,14 @@ function pullFitInventory() {
         if (!locationFlags.includes(locationFlag) || skipFlags.includes(locationFlag)) {
           continue;
         }
-        
+
+        // Skip assembled ships
+if (shipTypeIds.has(typeId)) {
+  continue;
+}
         totalItems++;
         
-// Resolve location chain: if locationId points to a container/ship, follow the chain
+        // Resolve location chain: if locationId points to a container/ship, follow the chain
         let finalLocationId = locationId;
         
         // Check if this location_id is actually a container/ship (item in assets)
@@ -256,4 +275,281 @@ function pullFitInventory() {
     Logger.log(`Stack: ${error.stack}`);
     Logger.log(`Error: ${error.message}`);
   }
+}
+
+/**
+ * POPULATE LOCATION FILTER
+ * 
+ * After pulling inventory, call this to populate FitCompare location filter (M3:N50)
+ * with deduplicated, alphabetically sorted unique station/structure names
+ * 
+ * Reads from inventory data (S2:AA2000), extracts column AA (SystemName which contains station/structure names),
+ * deduplicates, sorts, and writes to M3:M50
+ * Also sets all checkboxes (N3:N50) to TRUE by default
+ */
+function populateLocationFilter() {
+  try {
+    Logger.log('=== POPULATE LOCATION FILTER START ===');
+    
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const fitCompare = ss.getSheetByName('FitCompare');
+    const fitData = ss.getSheetByName('FitData');
+    
+    // Read from SystemCache (AB2:AD500) column AD = SystemName
+    Logger.log('Reading system cache...');
+    const cacheRange = fitData.getRange('AD3:AD500');
+    const cacheData = cacheRange.getValues();
+    
+    // Get unique locations
+    const uniqueLocations = [];
+    const seen = new Set();
+    
+    for (const row of cacheData) {
+      if (row && row[0] && typeof row[0] === 'string') {
+        const location = row[0].trim();
+        if (location.length > 0 && !location.includes('[Unknown') && !seen.has(location)) {
+          uniqueLocations.push(location);
+          seen.add(location);
+        }
+      }
+    }
+    
+    uniqueLocations.sort();
+    
+    if (uniqueLocations.length === 0) {
+      Logger.log('⚠ No valid locations found');
+      return;
+    }
+    
+    // Write to FitCompare M3:N50
+    fitCompare.getRange('M3:N50').clearContent();
+    
+    const filterData = [];
+    for (const location of uniqueLocations) {
+      filterData.push([location, true]);
+    }
+    
+    const rangeRef = `M3:N${2 + filterData.length}`;
+    fitCompare.getRange(rangeRef).setValues(filterData);
+    
+    Logger.log(`✓ Populated with ${filterData.length} locations`);
+    
+  } catch (error) {
+    Logger.log(`❌ ERROR: ${error.message}`);
+    throw error;
+  }
+}
+
+/**
+ * RUN FIT COMPARISON WORKFLOW
+ * 
+ * Main orchestration function for the complete fit comparison process:
+ * 1. Read target fit from FitCompare sheet (A3:H55)
+ * 2. Read current fit from FitCompare sheet (A60:H112) - optional
+ * 3. Parse both fits using EFT parser
+ * 4. Compare to determine what's needed
+ * 5. Read selected systems from location filter (M3:N50)
+ * 6. Read inventory data from FitData (S2:AA2000)
+ * 7. Calculate gaps for selected systems only
+ * 8. Populate buy list (A116:B250)
+ * 
+ * Call this via "Sheet Tools" menu after:
+ * - Pasting target fit in A3:H55
+ * - (Optional) Pasting current fit in A60:H112
+ * - Running pullFitInventory() to populate inventory data
+ * - Checking desired systems in location filter (M3:N50)
+ */
+function runFitComparison() {
+  try {
+    Logger.log('\n' + '='.repeat(80));
+    Logger.log('STARTING FIT COMPARISON WORKFLOW');
+    Logger.log('='.repeat(80) + '\n');
+    
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const fitCompare = ss.getSheetByName('FitCompare');
+    const fitData = ss.getSheetByName('FitData');
+    
+    if (!fitCompare || !fitData) {
+      throw new Error('Required sheets not found: FitCompare and/or FitData');
+    }
+    
+    // STEP 1: Read target fit from FitCompare (A3:H55)
+    Logger.log('STEP 1: Reading target fit (A3:H55)...');
+    const targetFitText = readFitFromSheet(fitCompare, 'A3:H55');
+    if (!targetFitText) {
+      throw new Error('No target fit found in A3:H55. Paste EFT format fit.');
+    }
+    Logger.log(`✓ Target fit read (${targetFitText.length} chars)`);
+    
+    // STEP 2: Read current fit from FitCompare (A60:H112)
+    Logger.log('\nSTEP 2: Reading current fit (A60:H112, optional)...');
+    const currentFitText = readFitFromSheet(fitCompare, 'A60:H112');
+    if (currentFitText) {
+      Logger.log(`✓ Current fit read (${currentFitText.length} chars)`);
+    } else {
+      Logger.log('ℹ No current fit found (will treat as empty)');
+    }
+    
+    // STEP 3: Parse both fits
+    Logger.log('\nSTEP 3: Parsing fits...');
+    const targetFit = parseEFT(targetFitText);
+    if (!targetFit.ship) {
+      throw new Error('Failed to parse target fit. Check EFT format: [ShipType, FitName]');
+    }
+    Logger.log(`✓ Target fit parsed: ${targetFit.ship} (${targetFit.items.length} items)`);
+    
+    const currentFit = currentFitText ? parseEFT(currentFitText) : { ship: null, fitName: null, items: [] };
+    Logger.log(`✓ Current fit parsed: ${currentFit.ship || '[empty]'} (${currentFit.items.length} items)`);
+    
+    // STEP 4: Compare fits
+    Logger.log('\nSTEP 4: Comparing fits...');
+    const neededItems = compareFits(targetFit, currentFit);
+    Logger.log(`✓ ${neededItems.length} items needed`);
+    
+    // STEP 5: Get FitQuantity multiplier
+    Logger.log('\nSTEP 5: Reading FitQuantity (L18)...');
+    const fitQuantity = getFitQuantity(fitCompare);
+    
+    // STEP 6: Get selected systems from location filter
+    Logger.log('\nSTEP 6: Reading location filter (M3:N50)...');
+    const selectedSystems = getSelectedSystems(fitCompare);
+    if (selectedSystems.length === 0) {
+      Logger.log('⚠ WARNING: No systems selected in location filter. Buy list will be empty.');
+    } else {
+      Logger.log(`✓ ${selectedSystems.length} systems selected: ${selectedSystems.join(', ')}`);
+    }
+    
+    // STEP 7: Read inventory data
+    Logger.log('\nSTEP 7: Reading inventory data (S2:AA2000)...');
+    const invRange = fitData.getRange('S2:AA2000');
+    const invData = invRange.getValues();
+    // Filter out empty rows (check if ItemName column exists)
+    const filteredInv = invData.filter(row => row && row[2] && typeof row[2] === 'string' && row[2].length > 0);
+    Logger.log(`✓ Inventory: ${filteredInv.length} items across all locations`);
+    
+    // STEP 8: Calculate gaps with FitQuantity multiplier and track sources
+    Logger.log('\nSTEP 8: Calculating gaps with FitQuantity multiplier...');
+    const { gap: gapAnalysis, sources: invSources } = calculateGapWithSources(neededItems, filteredInv, selectedSystems, fitQuantity);
+    Logger.log(`✓ Gap analysis complete: ${gapAnalysis.length} items`);
+    
+    // STEP 9: Populate buy list
+    Logger.log('\nSTEP 9: Populating buy list (A116:B250)...');
+    populateBuyList(fitCompare, gapAnalysis);
+    Logger.log('✓ Buy list populated');
+    
+    // SUMMARY
+    const itemsToBuy = gapAnalysis.filter(item => item.qtyToBuy > 0);
+    const totalUnits = itemsToBuy.reduce((sum, item) => sum + item.qtyToBuy, 0);
+    
+    Logger.log('\n' + '='.repeat(80));
+    Logger.log('FIT COMPARISON COMPLETE');
+    Logger.log('='.repeat(80));
+    Logger.log(`Target Ship: ${targetFit.ship}`);
+    Logger.log(`Fit Quantity: ${fitQuantity}x`);
+    Logger.log(`Items Needed: ${neededItems.length}`);
+    Logger.log(`Items to Buy: ${itemsToBuy.length}`);
+    Logger.log(`Total Units to Buy: ${totalUnits}`);
+    Logger.log('='.repeat(80) + '\n');
+    
+  } catch (error) {
+    Logger.log(`\n❌ ERROR: ${error.message}`);
+    Logger.log(`Stack: ${error.stack}`);
+    throw error;
+  }
+}
+
+/**
+ * Read fit text from a range on the sheet
+ * Concatenates all non-empty cells in the range into a single string
+ * 
+ * @param {Sheet} sheet - The sheet to read from
+ * @param {string} rangeRef - Range reference like 'A3:H55'
+ * @returns {string} Concatenated fit text, or empty string if range is empty
+ */
+function readFitFromSheet(sheet, rangeRef) {
+  const range = sheet.getRange(rangeRef);
+  const values = range.getValues();
+  
+  const lines = [];
+  for (let row = 0; row < values.length; row++) {
+    for (let col = 0; col < values[row].length; col++) {
+      const cell = values[row][col];
+      if (cell && typeof cell === 'string' && cell.trim().length > 0) {
+        lines.push(cell.trim());
+      }
+    }
+  }
+  
+  return lines.join('\n');
+}
+
+/**
+ * Get list of selected systems from location filter
+ * Reads M3:N50 where column M = system names, column N = checkboxes (TRUE/FALSE)
+ * Supports up to 48 unique systems
+ * 
+ * @param {Sheet} sheet - FitCompare sheet
+ * @returns {array} Array of system names that are checked
+ */
+function getSelectedSystems(sheet) {
+  const range = sheet.getRange('M3:N50');
+  const values = range.getValues();
+  
+  const selected = [];
+  for (let row = 0; row < values.length; row++) {
+    const systemName = values[row][0];
+    const isChecked = values[row][1];
+    
+    // Only include if system name exists and checkbox is TRUE
+    if (systemName && typeof systemName === 'string' && systemName.trim().length > 0 && isChecked === true) {
+      selected.push(systemName.trim());
+    }
+  }
+  
+  return selected;
+}
+
+/**
+ * Populate buy list in FitCompare sheet (A116:B250)
+ * Writes item names and quantities to buy
+ * Only includes items with qtyToBuy > 0 (sorted by qty descending)
+ * 
+ * @param {Sheet} sheet - FitCompare sheet
+ * @param {array} gapAnalysis - Array from calculateGap()
+ */
+function populateBuyList(sheet, gapAnalysis) {
+  // Clear existing buy list data (keep header)
+  sheet.getRange('A117:B250').clearContent();
+  
+  // Build output array: only items with qtyToBuy > 0
+  const buyItems = gapAnalysis.filter(item => item.qtyToBuy > 0);
+  
+  if (buyItems.length === 0) {
+    Logger.log('No items to buy.');
+    return;
+  }
+  
+  const output = [];
+  for (const item of buyItems) {
+    output.push([
+      item.name,
+      item.qtyToBuy
+    ]);
+  }
+  
+  // Write to sheet starting at A117
+  const rangeRef = `A117:B${116 + output.length}`;
+  Logger.log(`Writing buy list to ${rangeRef} (${output.length} items)`);
+  
+  sheet.getRange(rangeRef).setValues(output);
+}
+
+function clearLocationFilter() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const fitCompare = ss.getSheetByName('FitCompare');
+  
+  const range = fitCompare.getRange('N3:N50');
+  range.clearContent();
+  
+  Logger.log('✓ Location filter cleared');
 }
