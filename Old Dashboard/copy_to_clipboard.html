@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Copy Named Range</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 12px; }
+    .row { margin-bottom: 10px; }
+    label { margin-right: 12px; }
+    textarea { width: 100%; height: 220px; box-sizing: border-box; font-family: Consolas, "Courier New", monospace; }
+    .meta { color: #555; font-size: 12px; }
+    .buttons { margin-top: 8px; display: flex; gap: 8px; }
+    .status { margin-top: 6px; font-size: 12px; color: #006400; }
+    .error  { margin-top: 6px; font-size: 12px; color: #8B0000; }
+    fieldset { border: 1px solid #ccc; padding: 8px; }
+    legend { padding: 0 4px; }
+  </style>
+</head>
+<body>
+  <div class="row">
+    <fieldset>
+      <legend>Format</legend>
+      <label><input type="radio" name="fmt" value="tsv" checked> TSV (tabs)</label>
+      <label><input type="radio" name="fmt" value="csv"> CSV (commas)</label>
+    </fieldset>
+  </div>
+
+  <div class="row meta" id="meta">Range: —</div>
+
+  <div class="row">
+    <textarea id="out" placeholder="Loading named range…"></textarea>
+  </div>
+
+  <div class="buttons">
+    <button id="refreshBtn">Refresh "FitBuy"</button>
+    <button id="copyBtn">Copy to Clipboard</button>
+  </div>
+
+  <div id="msg" class="status"></div>
+  <div id="err" class="error"></div>
+
+  <script>
+    // The server injects the named range to load via template variable.
+    // Using JSON.stringify ensures valid JS even when empty.
+    const initialName = <?!= JSON.stringify(initialName) ?> || 'FitBuy';
+
+    function setMessage(text, isError) {
+      document.getElementById('msg').textContent = isError ? '' : (text || '');
+      document.getElementById('err').textContent = isError ? (text || '') : '';
+    }
+
+    function getSelectedFormat() {
+      const el = document.querySelector('input[name="fmt"]:checked');
+      return el ? el.value : 'tsv';
+    }
+
+    function renderResult(result) {
+      const out  = document.getElementById('out');
+      const meta = document.getElementById('meta');
+
+      const a1   = (result && result.meta && result.meta.a1) || '—';
+      const rows = (result && result.meta && result.meta.rows) || 0;
+      const cols = (result && result.meta && result.meta.cols) || 0;
+      const fmt  = (result && result.meta && result.meta.format) || 'tsv';
+
+      out.value = (result && result.text) ? result.text : '';
+      meta.textContent = 'Range: ' + a1 + ' | Rows: ' + rows + ' | Cols: ' + cols + ' | Format: ' + fmt;
+
+      setMessage('', false);
+      console.log('[copy_to_clipboard] Rendered ' + rows + 'x' + cols);
+    }
+
+    function refreshFitBuy() {
+      setMessage('Loading "FitBuy"…', false);
+      const fmt = getSelectedFormat();
+      console.log('[copy_to_clipboard] Requesting named range "' + initialName + '" as ' + fmt);
+      google.script.run
+        .withSuccessHandler(renderResult)
+        .withFailureHandler(err => setMessage('Error: ' + (err && err.message ? err.message : err), true))
+        .getRangeAsTextByName(initialName, fmt);
+    }
+
+    async function copyToClipboard() {
+      setMessage('', false);
+      const text = document.getElementById('out').value || '';
+      if (!text) {
+        setMessage('Nothing to copy. Click "Refresh \u201CFitBuy\u201D" first.', true);
+        return;
+      }
+
+      try {
+        await navigator.clipboard.writeText(text);
+        setMessage('Copied to clipboard.', false);
+        console.log('[copy_to_clipboard] Copied via navigator.clipboard');
+        return;
+      } catch (e) {
+        console.log('[copy_to_clipboard] navigator.clipboard failed:', e);
+      }
+
+      try {
+        const ta = document.getElementById('out');
+        ta.focus();
+        ta.select();
+        const ok = document.execCommand('copy');
+        if (ok) {
+          setMessage('Copied to clipboard.', false);
+          console.log('[copy_to_clipboard] Copied via execCommand');
+        } else {
+          setMessage('Copy failed. Select all (Ctrl/Cmd+A), then Ctrl/Cmd+C.', true);
+        }
+      } catch (e) {
+        setMessage('Copy failed. Select all (Ctrl/Cmd
