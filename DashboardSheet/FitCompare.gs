@@ -452,6 +452,11 @@ const gapResult = calculateGapWithSources(
   selectedSystems,
   fitQuantity
 );
+
+Logger.log(`DEBUG: gapResult = ${JSON.stringify(gapResult)}`);
+Logger.log(`DEBUG: gapResult.gap = ${JSON.stringify(gapResult.gap)}`);
+Logger.log(`DEBUG: gapResult.gap type = ${typeof gapResult.gap}`);
+
 const gapAnalysis = gapResult.gap;
 const sources = gapResult.sources;
 

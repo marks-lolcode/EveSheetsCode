@@ -118,8 +118,8 @@ function calculateGapWithSources(neededItems, inventory, selectedSystems, fitQua
     Logger.log('ℹ FitQuantity invalid, defaulting to 1');
   }
   
-  const gap = [];
-  const sources = {};
+  let gap = [];
+ let sources = {};
   
   // Build inventory map with sources: {itemName: [{character, location, qty}, ...]}
   const invMap = {};
