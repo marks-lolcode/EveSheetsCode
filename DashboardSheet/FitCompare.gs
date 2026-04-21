@@ -41,7 +41,7 @@ function getSystemForLocation(locationId) {
       Logger.log(`✓ Cache hit for location ${locationId}: ${cacheData[i][2]}`);
       return {
         locationId: locationId,
-        systemId: cacheData[i][1],
+systemId: cacheData[i][1],
         systemName: cacheData[i][2],
         locationType: 'cached'
       };
@@ -64,9 +64,7 @@ function getSystemForLocation(locationId) {
         Logger.log(`✓ Found station: ${systemName} (System: ${systemId})`);
         
         // Cache it
-        const lastRow = cacheData.filter(row => row[0]).length + 2;
-        fitData.getRange(`AB${lastRow}:AD${lastRow}`).setValues([[locationId, systemId, systemName]]);
-      }
+fitData.appendRow([locationId, systemId, systemName]);      }
     } catch (e) {
       Logger.log(`✗ Station lookup failed for ${locationId}: ${e.message}`);
     }
@@ -83,9 +81,8 @@ function getSystemForLocation(locationId) {
         Logger.log(`✓ Found structure: ${systemName} (System: ${systemId})`);
         
         // Cache it
-        const lastRow = cacheData.filter(row => row[0]).length + 2;
-        fitData.getRange(`AB${lastRow}:AD${lastRow}`).setValues([[locationId, systemId, systemName]]);
-      }
+fitData.appendRow([locationId, systemId, systemName]);
+     }
     } catch (e) {
       Logger.log(`✗ Structure lookup failed for ${locationId}: ${e.message}`);
     }
@@ -390,7 +387,7 @@ function runFitComparison() {
     
     // STEP 1: Read target fit from FitCompare (A3:H55)
     Logger.log('STEP 1: Reading target fit (A3:H55)...');
-    const targetFitText = readFitFromSheet(fitCompare, 'A3:H55');
+    const targetFitText = readFitFromSheet(fitCompare, 3, 55);
     if (!targetFitText) {
       throw new Error('No target fit found in A3:H55. Paste EFT format fit.');
     }
@@ -398,7 +395,7 @@ function runFitComparison() {
     
     // STEP 2: Read current fit from FitCompare (A60:H112)
     Logger.log('\nSTEP 2: Reading current fit (A60:H112, optional)...');
-    const currentFitText = readFitFromSheet(fitCompare, 'A60:H112');
+   const currentFitText = readFitFromSheet(fitCompare, 60, 112);
     if (currentFitText) {
       Logger.log(`✓ Current fit read (${currentFitText.length} chars)`);
     } else {
@@ -602,26 +599,26 @@ function clearLocationFilter() {
 }
 
 function populateInventorySources(sheet, gapAnalysis, sources) {
-  Logger.log(`DEBUG populateInventorySources: gapAnalysis type = ${typeof gapAnalysis}`);
-  Logger.log(`DEBUG: Array.isArray(gapAnalysis) = ${Array.isArray(gapAnalysis)}`);
-  Logger.log(`DEBUG: gapAnalysis.length = ${gapAnalysis ? gapAnalysis.length : 'null'}`);
-  Logger.log(`DEBUG: sources keys = ${Object.keys(sources).slice(0, 5)}`);
+  Logger.log(`DEBUG: gapAnalysis.length = ${gapAnalysis.length}`);
+  Logger.log(`DEBUG: sources keys = ${Object.keys(sources)}`);
   
   const output = [];
   
-for (const item of gapAnalysis) {
-  Logger.log(`Processing item: ${item.name}, qtyToBuy: ${item.qtyToBuy}, has sources: ${!!sources[item.name]}`);
-  if (item.qtyToBuy > 0 && sources[item.name]) {
-    for (const source of sources[item.name]) {
-      output.push([
-        item.name,
-        source.qty,
-        source.character,
-        source.location
-      ]);
+  for (const item of gapAnalysis) {
+    const hasSource = sources[item.name] ? true : false;
+    Logger.log(`Item: ${item.name}, qtyToBuy: ${item.qtyToBuy}, hasSource: ${hasSource}`);
+    
+    if (item.qtyToBuy > 0 && sources[item.name]) {
+      for (const source of sources[item.name]) {
+        output.push([
+          item.name,
+          source.qty,
+          source.character,
+          source.location
+        ]);
+      }
     }
   }
-}
   
   sheet.getRange('D115:G250').clearContent();
   sheet.getRange('D116:D116').setValue('Item');
