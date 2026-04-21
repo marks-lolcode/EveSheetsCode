@@ -438,23 +438,30 @@ logRemovalAdditions(fitCompare, transitionList);
       Logger.log(`✓ ${selectedSystems.length} systems selected: ${selectedSystems.join(', ')}`);
     }
     
-    // STEP 7: Read inventory data
-    Logger.log('\nSTEP 7: Reading inventory data (S2:AA2000)...');
-    const invRange = fitData.getRange('S2:AA2000');
-    const invData = invRange.getValues();
-    // Filter out empty rows (check if ItemName column exists)
-    const filteredInv = invData.filter(row => row && row[2] && typeof row[2] === 'string' && row[2].length > 0);
-    Logger.log(`✓ Inventory: ${filteredInv.length} items across all locations`);
-    
-    // STEP 8: Calculate gaps with FitQuantity multiplier and track sources
-    Logger.log('\nSTEP 8: Calculating gaps with FitQuantity multiplier...');
-    const { gap: gapAnalysis, sources: invSources } = calculateGapWithSources(neededItems, filteredInv, selectedSystems, fitQuantity);
-    Logger.log(`✓ Gap analysis complete: ${gapAnalysis.length} items`);
-    
-    // STEP 9: Populate buy list
-    Logger.log('\nSTEP 9: Populating buy list (A116:B250)...');
-    populateBuyList(fitCompare, gapAnalysis);
-    Logger.log('✓ Buy list populated');
+// STEP 7: Reading inventory data (S2:AA2000)...
+Logger.log('\nSTEP 7: Reading inventory data (S2:AA2000)...');
+const invRange = fitData.getRange('S2:AA2000');
+const inventory = invRange.getValues().filter(row => row[0]); // Filter out empty rows
+Logger.log(`✓ Inventory: ${inventory.length} items across all locations`);
+
+// STEP 8: Calculating gaps with FitQuantity multiplier...
+Logger.log('\nSTEP 8: Calculating gaps with FitQuantity multiplier...');
+const gapResult = calculateGapWithSources(
+  neededItems,
+  inventory,
+  selectedSystems,
+  fitQuantity
+);
+const gapAnalysis = gapResult.gap;
+const sources = gapResult.sources;
+
+// STEP 9: Populate buy list
+Logger.log('\nSTEP 9: Populating buy list (A116:B250)...');
+populateBuyList(fitCompare, gapAnalysis);
+
+// STEP 10: Populate inventory sources
+Logger.log('\nSTEP 10: Populating inventory sources (D116:G250)...');
+populateInventorySources(fitCompare, gapAnalysis, sources);
     
     // SUMMARY
     const itemsToBuy = gapAnalysis.filter(item => item.qtyToBuy > 0);
@@ -591,72 +598,32 @@ function clearLocationFilter() {
   Logger.log('✓ Location filter cleared');
 }
 
-function populateInventorySources() {
-  try {
-    Logger.log('=== POPULATE INVENTORY SOURCES ===');
-    
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const fitCompare = ss.getSheetByName('FitCompare');
-    const fitData = ss.getSheetByName('FitData');
-    
-    // Read buy list (A117:B250) - only items that need buying
-    const buyRange = fitCompare.getRange('A117:B250');
-    const buyData = buyRange.getValues();
-    
-    // Read inventory data
-    const invRange = fitData.getRange('S2:AA2000');
-    const invData = invRange.getValues();
-    
-    const output = [];
-    const excludeFlags = ['Cargo', 'FleetHangar', 'InfrastructureHangar'];
-    
-    // For each item in buy list
-    for (const buyRow of buyData) {
-      if (!buyRow[0] || buyRow[0].length === 0) break;
-      
-      const itemName = buyRow[0];
-      const qtyNeeded = buyRow[1];
-      
-      let qtyStillNeeded = qtyNeeded;
-      
-      // Find inventory sources
-      for (const invRow of invData) {
-        if (!invRow[2]) break;
-        if (qtyStillNeeded <= 0) break;
-        
-        if (invRow[2] === itemName) {
-          const locationFlag = invRow[5];
-          const invQty = invRow[3];
-          
-          if (excludeFlags.includes(locationFlag)) continue;
-          
-          const qtyToUse = Math.min(qtyStillNeeded, invQty);
-          
-          output.push([itemName, qtyToUse, invRow[0], invRow[8]]);
-          qtyStillNeeded -= qtyToUse;
-          
-          Logger.log(`Found: ${itemName} x${qtyToUse} from ${invRow[0]}`);
-        }
+function populateInventorySources(sheet, gapAnalysis, sources) {
+  // Build output from sources instead of re-reading inventory
+  const output = [];
+  
+  for (const item of gapAnalysis) {
+    if (item.qtyToBuy > 0 && sources[item.name]) {
+      for (const source of sources[item.name]) {
+        output.push([
+          item.name,
+          source.qty,
+          source.character,
+          source.location
+        ]);
       }
     }
-    
- fitCompare.getRange('D115:G250').clearContent();
-fitCompare.getRange('D116:D116').setValue('Item');
-fitCompare.getRange('E116:E116').setValue('Qty');
-fitCompare.getRange('F116:F116').setValue('Character');
-fitCompare.getRange('G116:G116').setValue('Location');
-
-if (output.length > 0) {
-  fitCompare.getRange(`D117:G${116 + output.length}`).setValues(output);
-}  
-    if (output.length > 0) {
-      fitCompare.getRange(`D116:G${115 + output.length}`).setValues(output);
-    }
-    
-    Logger.log(`✓ ${output.length} sources`);
-    
-  } catch (error) {
-    Logger.log(`❌ ${error.message}`);
+  }
+  
+  sheet.getRange('D115:G250').clearContent();
+  sheet.getRange('D116:D116').setValue('Item');
+  sheet.getRange('E116:E116').setValue('Qty');
+  sheet.getRange('F116:F116').setValue('Character');
+  sheet.getRange('G116:G116').setValue('Location');
+  
+  if (output.length > 0) {
+    sheet.getRange(`D117:G${116 + output.length}`).setValues(output);
+    Logger.log(`✓ Populated ${output.length} inventory source rows`);
   }
 }
 
