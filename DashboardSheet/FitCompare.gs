@@ -112,19 +112,18 @@ function pullFitInventory() {
   const fitCompare = ss.getSheetByName('FitCompare');
   const fitData = ss.getSheetByName('FitData');
   
-
-// Get list of ship type IDs to exclude assembled ships
-const shipTypeIds = new Set();
-const sdeSheet = ss.getSheetByName('SDE_invTypes');
-if (sdeSheet) {
-  const typeData = sdeSheet.getRange('A2:D60000').getValues();
-  for (let i = 0; i < typeData.length; i++) {
-    if (typeData[i][3] && typeData[i][3].toString().includes('Ship')) { // Column D = group
-      shipTypeIds.add(typeData[i][0]); // Column A = typeID
+  // Load ship type IDs (groupID 25-26 are ships)
+  const shipTypeIds = new Set();
+  const sdeSheet = ss.getSheetByName('SDE_invTypes');
+  if (sdeSheet) {
+    const typeData = sdeSheet.getRange('A2:D60000').getValues();
+    for (let i = 0; i < typeData.length; i++) {
+      if (typeData[i][1] >= 25 && typeData[i][1] <= 26) {
+        shipTypeIds.add(typeData[i][0]);
+      }
     }
+    Logger.log(`Loaded ${shipTypeIds.size} ship type IDs`);
   }
-  Logger.log(`Loaded ${shipTypeIds.size} ship type IDs`);
-}
   
   // Get selected characters
   const selectedCharsRange = fitCompare.getRange('K3:L11');
@@ -164,6 +163,20 @@ if (sdeSheet) {
       
       Logger.log(`${charName} has ${assets.length - 1} items total`);
       
+      // Build set of fitted ship itemIds (ships that have items inside them)
+      const fittedShips = new Set();
+      for (let i = 1; i < assets.length; i++) {
+        const locationId = assets[i][4];
+        // Check if this locationId is a ship's itemId (has children)
+        for (let j = 1; j < assets.length; j++) {
+          if (assets[j][2] === locationId && shipTypeIds.has(assets[j][7])) {
+            fittedShips.add(locationId);
+            break;
+          }
+        }
+      }
+      Logger.log(`Found ${fittedShips.size} fitted ships`);
+      
       // Build a map of item_id -> asset for quick lookup
       const assetMap = {};
       for (let i = 1; i < assets.length; i++) {
@@ -185,10 +198,12 @@ if (sdeSheet) {
           continue;
         }
 
-        // Skip assembled ships
-if (shipTypeIds.has(typeId)) {
-  continue;
-}
+        // Skip fitted ships (Hangar ships that have items fitted inside)
+        if (shipTypeIds.has(typeId) && locationFlag === 'Hangar' && fittedShips.has(locationId)) {
+          Logger.log(`Skipping fitted ship ${getItemNameFromTypeId(typeId)} at ${locationId}`);
+          continue;
+        }
+        
         totalItems++;
         
         // Resolve location chain: if locationId points to a container/ship, follow the chain
@@ -401,6 +416,10 @@ function runFitComparison() {
     const currentFit = currentFitText ? parseEFT(currentFitText) : { ship: null, fitName: null, items: [] };
     Logger.log(`✓ Current fit parsed: ${currentFit.ship || '[empty]'} (${currentFit.items.length} items)`);
     
+// After parsing fits, log removals/additions
+const transitionList = buildFitTransitionList(targetFit, currentFit);
+logRemovalAdditions(fitCompare, transitionList);
+
     // STEP 4: Compare fits
     Logger.log('\nSTEP 4: Comparing fits...');
     const neededItems = compareFits(targetFit, currentFit);
@@ -518,7 +537,10 @@ function getSelectedSystems(sheet) {
  * @param {array} gapAnalysis - Array from calculateGap()
  */
 function populateBuyList(sheet, gapAnalysis) {
-  // Clear existing buy list data (keep header)
+  // Clear column B (remove ADD/REMOVE markers)
+  sheet.getRange('B117:B250').clearContent();
+  
+  // Clear existing buy list data
   sheet.getRange('A117:B250').clearContent();
   
   // Build output array: only items with qtyToBuy > 0
@@ -537,11 +559,26 @@ function populateBuyList(sheet, gapAnalysis) {
     ]);
   }
   
-  // Write to sheet starting at A117
   const rangeRef = `A117:B${116 + output.length}`;
   Logger.log(`Writing buy list to ${rangeRef} (${output.length} items)`);
   
   sheet.getRange(rangeRef).setValues(output);
+}
+
+function logRemovalAdditions(sheet, transitionList) {
+  Logger.log('\n=== REMOVAL/ADDITION LIST ===');
+  
+  // Log removals
+  Logger.log('REMOVE from current fit:');
+  for (const item of transitionList.removals) {
+    Logger.log(`  ✗ ${item.name} (qty: ${item.qty})`);
+  }
+  
+  // Log additions
+  Logger.log('ADD to target fit:');
+  for (const item of transitionList.additions.concat(transitionList.replacements)) {
+    Logger.log(`  + ${item.name} (qty: ${item.qty})`);
+  }
 }
 
 function clearLocationFilter() {
@@ -552,4 +589,137 @@ function clearLocationFilter() {
   range.clearContent();
   
   Logger.log('✓ Location filter cleared');
+}
+
+function populateInventorySources() {
+  try {
+    Logger.log('=== POPULATE INVENTORY SOURCES ===');
+    
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const fitCompare = ss.getSheetByName('FitCompare');
+    const fitData = ss.getSheetByName('FitData');
+    
+    // Read buy list (A117:B250) - only items that need buying
+    const buyRange = fitCompare.getRange('A117:B250');
+    const buyData = buyRange.getValues();
+    
+    // Read inventory data
+    const invRange = fitData.getRange('S2:AA2000');
+    const invData = invRange.getValues();
+    
+    const output = [];
+    const excludeFlags = ['Cargo', 'FleetHangar', 'InfrastructureHangar'];
+    
+    // For each item in buy list
+    for (const buyRow of buyData) {
+      if (!buyRow[0] || buyRow[0].length === 0) break;
+      
+      const itemName = buyRow[0];
+      const qtyNeeded = buyRow[1];
+      
+      let qtyStillNeeded = qtyNeeded;
+      
+      // Find inventory sources
+      for (const invRow of invData) {
+        if (!invRow[2]) break;
+        if (qtyStillNeeded <= 0) break;
+        
+        if (invRow[2] === itemName) {
+          const locationFlag = invRow[5];
+          const invQty = invRow[3];
+          
+          if (excludeFlags.includes(locationFlag)) continue;
+          
+          const qtyToUse = Math.min(qtyStillNeeded, invQty);
+          
+          output.push([itemName, qtyToUse, invRow[0], invRow[8]]);
+          qtyStillNeeded -= qtyToUse;
+          
+          Logger.log(`Found: ${itemName} x${qtyToUse} from ${invRow[0]}`);
+        }
+      }
+    }
+    
+ fitCompare.getRange('D115:G250').clearContent();
+fitCompare.getRange('D116:D116').setValue('Item');
+fitCompare.getRange('E116:E116').setValue('Qty');
+fitCompare.getRange('F116:F116').setValue('Character');
+fitCompare.getRange('G116:G116').setValue('Location');
+
+if (output.length > 0) {
+  fitCompare.getRange(`D117:G${116 + output.length}`).setValues(output);
+}  
+    if (output.length > 0) {
+      fitCompare.getRange(`D116:G${115 + output.length}`).setValues(output);
+    }
+    
+    Logger.log(`✓ ${output.length} sources`);
+    
+  } catch (error) {
+    Logger.log(`❌ ${error.message}`);
+  }
+}
+
+function populateRemovalAdditions() {
+  try {
+    Logger.log('=== POPULATE REMOVAL/ADDITIONS ===');
+    
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const fitCompare = ss.getSheetByName('FitCompare');
+    const fitData = ss.getSheetByName('FitData');
+    
+    // Read target fit (A3:H55)
+    const targetRange = fitCompare.getRange('A3:H55');
+    const targetData = targetRange.getValues();
+    
+    // Read current fit (A60:H112)
+    const currentRange = fitCompare.getRange('A60:H112');
+    const currentData = currentRange.getValues();
+    
+    // Get item names from target
+    const targetItems = [];
+    for (let row = 0; row < targetData.length; row++) {
+      for (let col = 0; col < targetData[row].length; col++) {
+        const cell = targetData[row][col];
+        if (cell && typeof cell === 'string' && cell.trim().length > 0 && !cell.includes('[')) {
+          targetItems.push({ name: cell.trim().toLowerCase(), row: row + 3 });
+        }
+      }
+    }
+    
+    // Get item names from current
+    const currentItems = [];
+    for (let row = 0; row < currentData.length; row++) {
+      for (let col = 0; col < currentData[row].length; col++) {
+        const cell = currentData[row][col];
+        if (cell && typeof cell === 'string' && cell.trim().length > 0 && !cell.includes('[')) {
+          currentItems.push({ name: cell.trim().toLowerCase(), row: row + 60 });
+        }
+      }
+    }
+    
+    // Mark REMOVE in current fit (items not in target)
+    for (const item of currentItems) {
+      const inTarget = targetItems.find(t => t.name === item.name);
+      if (!inTarget) {
+        fitCompare.getRange(`B${item.row}`).setValue('REMOVE');
+        Logger.log(`REMOVE: ${item.name}`);
+      }
+    }
+    
+    // Mark ADD in target fit (items not in current)
+    for (const item of targetItems) {
+      const inCurrent = currentItems.find(c => c.name === item.name);
+      if (!inCurrent) {
+        fitCompare.getRange(`B${item.row}`).setValue('ADD');
+        Logger.log(`ADD: ${item.name}`);
+      }
+    }
+    
+    Logger.log('✓ Marked removals and additions');
+    
+  } catch (error) {
+    Logger.log(`❌ ERROR: ${error.message}`);
+    throw error;
+  }
 }
