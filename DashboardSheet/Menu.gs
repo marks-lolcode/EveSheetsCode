@@ -19,11 +19,16 @@ function onOpen() {
    *   6. Populate buy list (A116:B250)
    */
   ui.createMenu('Sheet Tools')
-      .addItem('Pull Inventory (Selected Characters)', 'pullFitInventory')
-      .addItem('Populate Location Filter', 'populateLocationFilter')
-      .addItem('Clear Location Filter', 'clearLocationFilter')
-      .addItem('Run Fit Comparison', 'runFitComparison')
-      .addItem('Fit Compare Pull Inventory', 'pullFitInventory')
-      .addItem('Populate Removal/Additions', 'populateRemovalAdditions')
+       .addItem('--- MAINTENANCE ---', 'dummy') // Acts as a header/separator with words
+        .addItem('01 - Clear Inventory Cache', 'clearInventoryCache')      
+       .addSeparator()
+       .addItem('--- PERFORM COMPARE ---', 'dummy') // Acts as a header/separator with words
+       .addSeparator()       
+        .addItem('02 - Pull Inventory (Selected Characters)', 'pullFitInventory')
+        .addItem('03 - Populate Location Filter', 'populateLocationFilter')
+        .addItem('04 - (optional) Clear Location Filter', 'clearLocationFilter')
+        .addItem('05 - Run Fit Comparison', 'runFitComparison')
+        .addItem('06 - Fit Compare Pull Inventory', 'pullFitInventory')
+        .addItem('07 - Populate Removal/Additions', 'populateRemovalAdditions')
       .addToUi();
 }
