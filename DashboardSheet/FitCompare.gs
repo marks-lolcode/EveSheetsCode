@@ -497,21 +497,19 @@ populateInventorySources(fitCompare, gapAnalysis, sources);
  * @param {string} rangeRef - Range reference like 'A3:H55'
  * @returns {string} Concatenated fit text, or empty string if range is empty
  */
-function readFitFromSheet(sheet, rangeRef) {
-  const range = sheet.getRange(rangeRef);
+function readFitFromSheet(sheet, startRow, endRow) {
+  const range = sheet.getRange(startRow, 1, (endRow - startRow + 1), 1);
   const values = range.getValues();
   
-  const lines = [];
-  for (let row = 0; row < values.length; row++) {
-    for (let col = 0; col < values[row].length; col++) {
-      const cell = values[row][col];
-      if (cell && typeof cell === 'string' && cell.trim().length > 0) {
-        lines.push(cell.trim());
-      }
+  let fitText = '';
+  for (const row of values) {
+    const cell = row[0];
+    if (cell && cell.toString().trim()) {
+      fitText += cell + '\n';
     }
   }
   
-  return lines.join('\n');
+  return fitText;
 }
 
 /**
@@ -604,21 +602,26 @@ function clearLocationFilter() {
 }
 
 function populateInventorySources(sheet, gapAnalysis, sources) {
-  // Build output from sources instead of re-reading inventory
+  Logger.log(`DEBUG populateInventorySources: gapAnalysis type = ${typeof gapAnalysis}`);
+  Logger.log(`DEBUG: Array.isArray(gapAnalysis) = ${Array.isArray(gapAnalysis)}`);
+  Logger.log(`DEBUG: gapAnalysis.length = ${gapAnalysis ? gapAnalysis.length : 'null'}`);
+  Logger.log(`DEBUG: sources keys = ${Object.keys(sources).slice(0, 5)}`);
+  
   const output = [];
   
-  for (const item of gapAnalysis) {
-    if (item.qtyToBuy > 0 && sources[item.name]) {
-      for (const source of sources[item.name]) {
-        output.push([
-          item.name,
-          source.qty,
-          source.character,
-          source.location
-        ]);
-      }
+for (const item of gapAnalysis) {
+  Logger.log(`Processing item: ${item.name}, qtyToBuy: ${item.qtyToBuy}, has sources: ${!!sources[item.name]}`);
+  if (item.qtyToBuy > 0 && sources[item.name]) {
+    for (const source of sources[item.name]) {
+      output.push([
+        item.name,
+        source.qty,
+        source.character,
+        source.location
+      ]);
     }
   }
+}
   
   sheet.getRange('D115:G250').clearContent();
   sheet.getRange('D116:D116').setValue('Item');

@@ -111,7 +111,10 @@ function findOriginalName(key, itemsArray) {
  */
 function calculateGapWithSources(neededItems, inventory, selectedSystems, fitQuantity) {
   Logger.log('=== CALCULATE GAP WITH SOURCES START ===');
-  Logger.log(`Needed items: ${neededItems.length}, Fit Quantity: ${fitQuantity}`);
+  Logger.log(`DEBUG: neededItems type = ${typeof neededItems}, length = ${neededItems ? neededItems.length : 'null'}`);
+  Logger.log(`DEBUG: inventory type = ${typeof inventory}, length = ${inventory ? inventory.length : 'null'}`);
+  Logger.log(`DEBUG: selectedSystems = ${JSON.stringify(selectedSystems)}`);
+  Logger.log(`DEBUG: fitQuantity = ${fitQuantity}`);
   
   if (!fitQuantity || fitQuantity < 1) {
     fitQuantity = 1;
@@ -119,7 +122,7 @@ function calculateGapWithSources(neededItems, inventory, selectedSystems, fitQua
   }
   
   let gap = [];
- let sources = {};
+  let sources = {};
   
   // Build inventory map with sources: {itemName: [{character, location, qty}, ...]}
   const invMap = {};
@@ -127,14 +130,12 @@ function calculateGapWithSources(neededItems, inventory, selectedSystems, fitQua
   for (const row of inventory) {
     if (!row || row.length < 9) continue;
     
-    // [Character, TypeID, ItemName, Qty, LocationID, LocationFlag, LocationType, SystemID, SystemName]
     const character = row[0];
     const itemName = row[2];
     const qty = row[3];
-    const location = row[8];  // SystemName (station/structure name)
+    const location = row[8];
     const systemName = row[8];
     
-    // Only count if system is selected and location is not "[Unknown]"
     if (systemName && selectedSystems.includes(systemName) && !systemName.includes('[Unknown')) {
       if (!invMap[itemName]) {
         invMap[itemName] = [];
@@ -149,15 +150,12 @@ function calculateGapWithSources(neededItems, inventory, selectedSystems, fitQua
   
   Logger.log(`Inventory items in selected systems: ${Object.keys(invMap).length}`);
   
-  // Calculate gaps with multiplier
   for (const item of neededItems) {
-    const qtyNeeded = item.qty * fitQuantity;  // Multiply by number of fits
+    const qtyNeeded = item.qty * fitQuantity;
     
-    // Sum available quantity from all sources
     let qtyOnHand = 0;
     if (invMap[item.name]) {
       qtyOnHand = invMap[item.name].reduce((sum, source) => sum + source.qty, 0);
-      // Store sources for this item
       sources[item.name] = invMap[item.name];
     }
     
@@ -174,7 +172,6 @@ function calculateGapWithSources(neededItems, inventory, selectedSystems, fitQua
     Logger.log(`${item.name}: need ${qtyNeeded} (x${fitQuantity}), have ${qtyOnHand}, buy ${qtyToBuy}`);
   }
   
-  // Sort
   gap.sort((a, b) => {
     if ((a.qtyToBuy > 0) !== (b.qtyToBuy > 0)) return b.qtyToBuy - a.qtyToBuy;
     if (a.qtyToBuy !== b.qtyToBuy) return b.qtyToBuy - a.qtyToBuy;
@@ -184,9 +181,12 @@ function calculateGapWithSources(neededItems, inventory, selectedSystems, fitQua
   Logger.log(`Gap rows: ${gap.length}`);
   Logger.log('=== CALCULATE GAP WITH SOURCES END ===\n');
   
+  Logger.log(`DEBUG: gap after building = ${JSON.stringify(gap)}`);
+  Logger.log(`DEBUG: gap is array? ${Array.isArray(gap)}`);
+  Logger.log(`DEBUG: gap.length = ${gap.length}`);
+  
   return { gap, sources };
 }
-
 /**
  * Get FitQuantity value from Constants sheet or default
  * Reads named range "FitQuantity" which should be in FitCompare L18

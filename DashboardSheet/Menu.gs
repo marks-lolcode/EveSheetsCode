@@ -23,7 +23,7 @@ function onOpen() {
       .addItem('Populate Location Filter', 'populateLocationFilter')
       .addItem('Clear Location Filter', 'clearLocationFilter')
       .addItem('Run Fit Comparison', 'runFitComparison')
-      .addItem('Populate Inventory Sources', 'populateInventorySources')
+      .addItem('Fit Compare Pull Inventory', 'pullFitInventory')
       .addItem('Populate Removal/Additions', 'populateRemovalAdditions')
       .addToUi();
 }
