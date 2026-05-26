@@ -80,3 +80,20 @@ function getOrCreateSheet(sheetName) {
     throw error;
   }
 }
+
+
+/**
+ * HELPER: Clear SystemCache data rows (keep header)
+ * 
+ * Clears all data from SystemCache (AB3:AD) in FitData sheet.
+ * Preserves the header row (AB2:AD2).
+ * 
+ * @throws {Error} If FitData sheet not found
+ */
+function clearInventoryCache() {
+ clearSheetOrRange(SpreadsheetApp.getActiveSpreadsheet().getSheetByName('FitData').getRange('AB3:AD2000'))
+}
+
+function dummy() {
+  // Do nothing - used for menu headers only
+}
