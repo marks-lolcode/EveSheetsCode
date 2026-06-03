@@ -1,0 +1,18 @@
+{
+  "timeZone": "America/Chicago",
+  "dependencies": {
+    "libraries": [
+      {
+        "userSymbol": "GESI",
+        "version": "53",
+        "libraryId": "1KjnRVVFr2KiHH55sqBfHcZ-yXweJ7iv89V99ubaLy4A7B_YH8rB5u0s3"
+      }
+    ]
+  },
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "webapp": {
+    "executeAs": "USER_DEPLOYING",
+    "access": "ANYONE_ANONYMOUS"
+  }
+}
