@@ -89,6 +89,17 @@ function round4(n) { return Math.round((Number(n) || 0) * 10000) / 10000; }
 function norm_(v) { return String(v == null ? '' : v).trim().toLowerCase(); }
 
 function pickPrice_(entry, side) { entry = entry || { buy: 0, sell: 0 }; return side === 'buy' ? (entry.buy || 0) : (entry.sell || 0); }
+
+// Replace any existing basic filter on a tab with one covering its used range.
+// (swapStagingToLive_ rewrites the live sheet each run, dropping the old filter.)
+function setSheetFilter_(tabName, L) {
+  const sh = SS.getSheetByName(tabName);
+  if (!sh) return;
+  const existing = sh.getFilter(); if (existing) existing.remove();
+  const lr = sh.getLastRow(), lc = sh.getLastColumn();
+  if (lr > 1 && lc > 0) sh.getRange(1, 1, lr, lc).createFilter();
+  L && L.log('[setSheetFilter_]', { tab: tabName, rows: lr, cols: lc });
+}
 function toBool_(v) { return v === true || String(v == null ? '' : v).trim().toUpperCase() === 'TRUE'; }
 
 // AllInventory column indices (incl owner + location_flag for filtering/grouping).
@@ -1312,8 +1323,9 @@ function planetInputDemand_(L, opts) {
     usedRows++;
     let m = demand.get(ch); if (!m) { m = new Map(); demand.set(ch, m); }
     run.inputs.forEach(i => {
-      const cur = m.get(i.type) || { qty: 0, name: i.name };
+      const cur = m.get(i.type) || { qty: 0, name: i.name, outputs: new Set() };
       cur.qty += i.unitsPerRun * run.runsPerPlanet; // one planet row = runsPerPlanet runs
+      if (run.outputName) cur.outputs.add(run.outputName);
       m.set(i.type, cur);
     });
   });
@@ -1338,7 +1350,8 @@ function perCharBuyLines_(L, opts) {
       const d = m.get(tid);
       const need = Math.ceil(d.qty);
       const onhand = have.get(tid) || 0;
-      lines.push({ ch, tid, name: d.name, need, onhand, buy: Math.max(0, need - onhand) });
+      const output = d.outputs ? Array.from(d.outputs).sort().join(', ') : '';
+      lines.push({ ch, tid, name: d.name, output, need, onhand, buy: Math.max(0, need - onhand) });
     });
   });
   return { lines, typeSet, chars, prodRows };
@@ -1351,14 +1364,16 @@ function buildPiBuyListByChar_(L) {
   const prices = loadJitaPrices_(Array.from(typeSet), L);
   const types = loadTypeMap_(L);
 
-  const out = [['character', 'input_name', 'type_id', 'qty_needed', 'qty_on_hand', 'qty_to_buy', 'unit_price', 'm3', 'line_cost']];
+  lines.sort((a, b) => a.ch.localeCompare(b.ch) || String(a.name).localeCompare(String(b.name)));
+  const out = [['output_name', 'character', 'input_name', 'type_id', 'qty_needed', 'qty_on_hand', 'qty_to_buy', 'unit_price', 'm3', 'line_cost']];
   lines.forEach(ln => {
     const unit = pickPrice_(prices.get(ln.tid), 'sell');
     const vol = (types.get(ln.tid) || {}).volume || 0;
-    out.push([ln.ch, ln.name, ln.tid, ln.need, ln.onhand, ln.buy, round2(unit), round2(ln.buy * vol), round2(ln.buy * unit)]);
+    out.push([ln.output, ln.ch, ln.name, ln.tid, ln.need, ln.onhand, ln.buy, round2(unit), round2(ln.buy * vol), round2(ln.buy * unit)]);
   });
   writeAllToStaging_(PIBUYLISTCHAR_TAB + '__staging', out, L);
   swapStagingToLive_(PIBUYLISTCHAR_TAB + '__staging', PIBUYLISTCHAR_TAB, L);
+  setSheetFilter_(PIBUYLISTCHAR_TAB, L);
   L && L.log('[buildPiBuyListByChar_]', { characters: chars.length, lines: lines.length, production_rows: prodRows });
   return { characters: chars.length, lines: lines.length };
 }
