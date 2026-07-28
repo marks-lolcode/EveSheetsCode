@@ -10,10 +10,17 @@
    ========================= */
 
 // Bump this when you deploy so you can see which version is live.
-const BUILD_TAG = 'upload-rows-2025-09-20T';
+const BUILD_TAG = 'token-from-script-props-2026-07-28';
 
 // Shared secret your client (PowerShell) must include in POST bodies.
-const TOKEN = 'albatross-dreamland-oxidant-abstract';
+// Stored in Script Properties (key 'WEBAPP_TOKEN'), NOT in source.
+// WHY: this repo is public; a literal here publishes the secret.
+// Client side reads the same value from $env:EVE_WEBAPP_TOKEN.
+function getToken_() {
+  const t = PropertiesService.getScriptProperties().getProperty('WEBAPP_TOKEN');
+  if (!t) throw new Error("Script Property 'WEBAPP_TOKEN' is not set (Project Settings -> Script Properties).");
+  return t;
+}
 
 // If you still use the server-side (Drive) importer:
 const CSV_NAME = 'assets_export.csv';
@@ -372,7 +379,7 @@ function doPost(e) {
   }
 
   // Token
-  if (!body || body.token !== TOKEN) {
+  if (!body || body.token !== getToken_()) {
     return json_(false, 'forbidden', { error: 'Forbidden' }, L, started);
   }
 

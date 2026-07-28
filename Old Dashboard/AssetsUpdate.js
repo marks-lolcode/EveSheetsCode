@@ -1,119 +1,16 @@
 /**
- * Web App entrypoints with shared dispatcher and robust logging.
- * WHAT: Accepts either JSON POST or URL query GET.
- * WHY: Easier testing (GET in browser) and reliable headless calls (POST).
+ * Spreadsheet-side inventory import.
+ * WHAT: updatePIFullness() (bound to the "Load and Process Inventory" menu item
+ *       in Menu.js) plus the Drive CSV importer it calls.
+ * WHY:  The Web App entrypoints live in WebApp.js. This file used to define its
+ *       own doPost/doGet/_handleRequest_ as well; because Apps Script shares one
+ *       global scope, those silently lost to WebApp.js and were never reachable.
+ *       Removed 2026-07-28 so the live handler is the one you can read.
  *
- * SECURITY: Uses a shared secret token. Keep it private.
- * IMPORTANT: TOKEN_VALUE must match what your PowerShell script sends.
+ * NOTE: updatePIFullness() here is a different implementation from
+ *       updatePIFullness_() in WebApp.js (trailing underscore). This one is the
+ *       menu path; that one is the Web App path and uses staging + atomic swap.
  */
-
-function doPost(e) {
-  // POST from PowerShell or other clients
-  return _handleRequest_(e, 'POST');
-}
-
-function doGet(e) {
-  // GET from a browser for quick "ping" tests
-  return _handleRequest_(e, 'GET');
-}
-
-function _handleRequest_(e, method) {
-  Logger.log('[%s] Start. Has e=%s', method, !!e);
-
-  // 1) Parse payload safely
-  // If POST with application/json: read and parse JSON body.
-  // Else: read query params (so ?fn=ping&token=... works in a browser).
-  let payload = {};
-  try {
-    if (method === 'POST' &&
-        e && e.postData &&
-        e.postData.type &&
-        String(e.postData.type).indexOf('application/json') !== -1) {
-
-      const raw = (e.postData.contents != null)
-        ? e.postData.contents
-        : (e.postData.getDataAsString ? e.postData.getDataAsString() : '');
-
-      payload = raw ? JSON.parse(raw) : {};
-      Logger.log('[%s] Parsed JSON payload keys: %s', method, Object.keys(payload).join(','));
-    } else {
-      payload = e && e.parameter
-        ? Object.keys(e.parameter).reduce((o, k) => (o[k] = e.parameter[k], o), {})
-        : {};
-      Logger.log('[%s] Parsed query payload keys: %s', method, Object.keys(payload).join(','));
-    }
-  } catch (err) {
-    Logger.log('[%s] ERROR parsing payload: %s', method, err && err.message);
-    return _json({ ok: false, error: 'Invalid JSON/params' });
-  }
-
-  // 2) Auth: shared-secret token
-  // Replace with your exact token, and ensure your PowerShell script sends the same string.
-  const TOKEN_VALUE = 'albatross-dreamland-oxidant-abstract';  // <<< SET THIS EXACTLY
-  const incoming = String((payload.token || payload.Token || '')).trim();
-  const expected = String(TOKEN_VALUE).trim();
-  const match = (incoming === expected);
-
-  Logger.log('[%s] Token check: incoming.len=%s expected.len=%s equal=%s',
-             method, incoming.length, expected.length, match);
-
-  if (!match) {
-    return _json({ ok: false, error: 'Forbidden' });
-  }
-
-  // 3) Dispatch to function
-  const fn = String(payload.fn || 'updatePIFullness');
-  const t0 = Date.now();
-  Logger.log('[%s] Dispatching fn=%s', method, fn);
-
-  try {
-    let result;
-
-    if (fn === 'ping') {
-      // Lightweight health check
-      result = { pong: true, now: new Date().toISOString(), method };
-    } else if (fn === 'updatePIFullness') {
-      // Your two-step pipeline:
-      // Step 1 writes the sheet, Step 2 reads/derives; flush ensures reads see writes.
-      const a = importCSVFromDrive();          // Must exist in your project
-      SpreadsheetApp.flush();                  // Ensure all writes are committed
-      const b = filterInventoryByTypeFirst();  // Must exist in your project
-      result = {
-        importedRows: (a && a.length) || 0,
-        processedRows: (b && b.length) || 0
-      };
-    } else {
-      return _json({ ok: false, error: 'Unknown function' });
-    }
-
-    const ms = Date.now() - t0;
-    Logger.log('[%s] Success fn=%s in %s ms', method, fn, ms);
-    return _json({ ok: true, fn, ms, result });
-
-  } catch (err) {
-    Logger.log('[%s] ERROR running fn=%s: %s\nStack: %s', method, fn,
-               err && err.message, err && err.stack);
-    return _json({ ok: false, error: String(err && err.message || err) });
-  }
-}
-
-/**
- * Small helper to return JSON consistently.
- * WHAT: Avoids repeating boilerplate; sets correct MIME type.
- */
-function _json(obj) {
-  return ContentService
-    .createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-
-
-
-
-
-
-
-
 
 /**
  * updatePIFullness(options)

@@ -1,0 +1,29 @@
+# Normalize all text files to LF in the repo, regardless of each contributor's
+# core.autocrlf setting. Stops "LF will be replaced by CRLF" warnings on Windows
+# clones and keeps diffs clean across macOS/Linux/Windows.
+* text=auto eol=lf
+
+# Windows batch files: cmd.exe can mis-parse labels/goto without CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Shell scripts must stay LF or Linux/CI fails with "bad interpreter: ...^M".
+*.sh text eol=lf
+
+# Binary assets — never touch line endings.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.eot   binary
+*.br    binary
+*.zip   binary
+*.pptx  binary
+*.xlsx  binary
+*.docx  binary
+*.pdf   binary

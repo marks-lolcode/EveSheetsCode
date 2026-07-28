@@ -1,0 +1,39 @@
+# OS and editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+**/desktop.ini
+*.swp
+*.swo
+*~
+
+# Claude Code per-developer state - local only
+.claude/settings.local.json
+
+# clasp: .clasp.json holds the bound Script ID; .clasprc.json holds live OAuth
+# tokens. Regenerate with `clasp clone <scriptId>` on a new machine.
+.clasp.json
+**/.clasp.json
+.clasprc.json
+**/.clasprc.json
+.stage/
+.wrapper-stage/
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+*.log
+
+# Credentials - never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.key
+client_secret*.json
+credentials.json
+*service-account*.json
+secrets.json
