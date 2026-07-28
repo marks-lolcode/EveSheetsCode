@@ -4,7 +4,8 @@
  * WHY: Easier testing (GET in browser) and reliable headless calls (POST).
  *
  * SECURITY: Uses a shared secret token. Keep it private.
- * IMPORTANT: TOKEN_VALUE must match what your PowerShell script sends.
+ * IMPORTANT: the token lives in Script Property 'WEBAPP_TOKEN' and must match
+ * what your PowerShell script sends ($env:EVE_WEBAPP_TOKEN). Never inline it.
  */
 
 function doPost(e) {
@@ -48,8 +49,9 @@ function _handleRequest_(e, method) {
   }
 
   // 2) Auth: shared-secret token
-  // Replace with your exact token, and ensure your PowerShell script sends the same string.
-  const TOKEN_VALUE = 'albatross-dreamland-oxidant-abstract';  // <<< SET THIS EXACTLY
+  // Value lives in Script Properties (key 'WEBAPP_TOKEN'), never in source.
+  // getToken_() is defined in WebApp.js; Apps Script shares one global scope.
+  const TOKEN_VALUE = getToken_();
   const incoming = String((payload.token || payload.Token || '')).trim();
   const expected = String(TOKEN_VALUE).trim();
   const match = (incoming === expected);
